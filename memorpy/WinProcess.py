@@ -15,12 +15,12 @@
 # along with memorpy.  If not, see <http://www.gnu.org/licenses/>.
 
 from ctypes import pointer, sizeof, windll, create_string_buffer, c_ulong, byref, GetLastError, c_bool, WinError
-from structures import *
+from .structures import *
 import copy
 import struct
-import utils
+import memorpy.utils
 import platform
-from BaseProcess import BaseProcess, ProcessException
+from .BaseProcess import BaseProcess, ProcessException
 
 psapi       = windll.psapi
 kernel32    = windll.kernel32
@@ -72,27 +72,32 @@ class WinProcess(BaseProcess):
         processes=[]
         arr = c_ulong * 256
         lpidProcess= arr()
+        pids = (ctypes.wintypes.DWORD*1024)()
         cb = sizeof(lpidProcess)
-        cbNeeded = c_ulong()
+        bytes_returned = ctypes.wintypes.DWORD()
         hModule = c_ulong()
         count = c_ulong()
         modname = create_string_buffer(100)
         PROCESS_QUERY_INFORMATION = 0x0400
         PROCESS_VM_READ = 0x0010
 
-        psapi.EnumProcesses(byref(lpidProcess), cb, byref(cbNeeded))
-        nReturned = cbNeeded.value/sizeof(c_ulong())
+        psapi.EnumProcesses(byref(pids), cb, byref(bytes_returned))
+        #nReturned = cbNeeded.value/sizeof(c_ulong())
 
-        pidProcess = [i for i in lpidProcess][:nReturned]
-        for pid in pidProcess:
+        #pidProcess = [i for i in lpidProcess][:nReturned]
+        #for pid in pidProcess:
+        print(bytes_returned)
+        for index in range(bytes_returned.value // ctypes.sizeof(ctypes.wintypes.DWORD)):
+            pid = pids[index]
             proc={ "pid": int(pid) }
             hProcess = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
             if hProcess:
                 psapi.EnumProcessModules(hProcess, byref(hModule), sizeof(hModule), byref(count))
                 psapi.GetModuleBaseNameA(hProcess, hModule.value, modname, sizeof(modname))
-                proc["name"]=modname.value
+                proc["name"]=modname.value.decode()
                 kernel32.CloseHandle(hProcess)
             processes.append(proc)
+        #print(processes)
         return processes
 
     @staticmethod
@@ -202,6 +207,7 @@ class WinProcess(BaseProcess):
             if protec:
                 if not protect & protec or protect & PAGE_NOCACHE or protect & PAGE_WRITECOMBINE or protect & PAGE_GUARD:
                     offset += chunk
+                    #print('skip 0x{:08X}'.format(offset))
                     continue
             yield offset, chunk
             offset += chunk
@@ -240,7 +246,7 @@ class WinProcess(BaseProcess):
         address = int(address)
         buffer = create_string_buffer(bytes)
         bytesread = c_size_t(0)
-        data = ''
+        data = b''
         length = bytes
         while length:
             if RpM(self.h_process, address, buffer, bytes, byref(bytesread)) or (use_NtWow64ReadVirtualMemory64 and GetLastError() == 0):
